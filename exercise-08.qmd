@@ -1,0 +1,154 @@
+---
+title: "exercise-08"
+format: html
+---
+
+# Step 1
+
+``` {r}
+library(tidyverse)
+library(tibble)
+library(skimr)
+library(mosaic)
+d <- tibble(read_csv("https://raw.githubusercontent.com/difiore/ada-datasets/main/Street_et_al_2017.csv"))
+skim(d)
+```
+
+# Step 2
+
+``` {r}
+ECVvsGS <- ggplot(data = d, aes(log(ECV), log(Group_size))) +
+  geom_point()
+ECVvsGS
+```
+
+``` {r}
+ECVvsL <- ggplot(data = d, aes(log(ECV), log(Longevity))) +
+  geom_point()
+ECVvsL
+```
+
+``` {r}
+ECVvsW <- ggplot(data = d, aes(log(ECV), log(Weaning))) +
+  geom_point()
+ECVvsW
+```
+
+``` {r}
+ECVvsRL <- ggplot(data = d, aes(log(ECV), log(Repro_lifespan))) +
+  geom_point()
+ECVvsRL
+```
+
+# Step 3
+
+``` {r}
+d_ECVvsGS <- d %>%
+  filter(!is.na(ECV) & !is.na(Group_size)) #%>%
+  #mutate(ECV = log(ECV), Group_size = log(Group_size))
+beta1 <- cov(d_ECVvsGS$ECV, d_ECVvsGS$Group_size)/var(d_ECVvsGS$ECV)
+beta0 <- mean(d_ECVvsGS$Group_size) - (beta1 * mean(d_ECVvsGS$ECV))
+cat("beta1 = ", beta1, "\n")
+cat("beta0 = ", beta0, "\n")
+```
+
+# Step 4
+
+``` {r}
+d_ECVvsGS_s <- lm(data = d_ECVvsGS, Group_size ~ ECV)
+summary(d_ECVvsGS_s)
+```
+
+# Step 5
+
+``` {r}
+Catarrhines <- d_ECVvsGS %>%
+  filter(Taxonomic_group == "Catarrhini")
+Catarrhines_s <- lm(data = Catarrhines, Group_size ~ ECV)
+summary(Catarrhines_s)
+```
+
+``` {r}
+Platyrrhines <- d_ECVvsGS %>%
+  filter(Taxonomic_group == "Platyrrhini")
+Platyrrhines_s <- lm(data = Platyrrhines, Group_size ~ ECV)
+summary(Platyrrhines_s)
+```
+
+``` {r}
+Strepsirhines <- d_ECVvsGS %>%
+  filter(Taxonomic_group == "Strepsirhini")
+Strepsirhines_s <- lm(data = Strepsirhines, Group_size ~ ECV)
+summary(Strepsirhines_s)
+```
+
+The regression coefficients do seem to differ among groups. I can check using the lm() function and including Taxonomic_group as an interaction term:
+
+``` {r}
+compare <- lm(data = d_ECVvsGS, Group_size ~ ECV * Taxonomic_group)
+summary(compare)
+```
+
+Given all p-values other than ECV vs Strepsirhini are less than 0.05 (AKA all beta1 and beta0 values are statistically significantly different except for ECV), that means the regression coefficients are in fact different among groups.
+
+# Step 6
+
+``` {r}
+SSE <- sum((d_ECVvsGS_s$model$Group_size - d_ECVvsGS_s$fitted.values)^2)
+df_regression <- 1
+df_error <- nrow(d_ECVvsGS) - df_regression - 1
+MSE <- SSE/df_error
+SSX <- sum((d_ECVvsGS$ECV - mean(d_ECVvsGS$ECV))^2)
+SE_beta1 <- sqrt(MSE/SSX)
+CI_beta1 <- beta1 + c(qnorm(0.025), qnorm(0.975)) * SE_beta1
+SSR <- sum((d_ECVvsGS_s$model$Group_size - mean(d_ECVvsGS_s$model$Group_size))^2)
+MSR <- SSR/df_regression
+fratio_beta1 <- MSR/MSE
+p_beta1 <- pf(fratio_beta1, df_regression, df_error, lower.tail = FALSE)
+cat("beta1 = ", beta1, "\n")
+cat("standard error of beta1 = ", SE_beta1, "\n")
+cat("confidence interval of beta1 = ", CI_beta1, "\n")
+cat("p value of beta1 = ", p_beta1, "\n")
+```
+
+``` {r}
+beta1_s <- lm(Group_size ~ ECV, d_ECVvsGS)
+summary(beta1_s)
+```
+
+# Step 7
+
+For generating a null sampling distribution for the slope coefficient, I would need to permute the ECV and group size each.
+
+``` {r}
+nperm <- 1000
+permuted_beta1 <- vector(length = nrow(d_ECVvsGS))
+for(i in 1:nperm) {
+  x <- sample(d_ECVvsGS$ECV)
+  y <- sample(d_ECVvsGS$Group_size)
+  permuted_beta1[[i]] <- cov(x, y)/var(y)
+}
+p_perm <- sum(abs(permuted_beta1) >= abs(beta1))/nperm
+cat("p value of the slope coefficient compared to the null sampling distribution: ", p_perm, "\n")
+```
+
+# Step 8
+
+``` {r}
+x <- rnorm(100000, beta1, SE_beta1)
+sample_size <- 30
+s <- sample(x, size = sample_size, replace = FALSE)
+n_boot <- 10000
+boot <- do(n_boot) * mean(~sample(s, length(s), replace = TRUE))
+boot <- boot[,1]
+se <- sd(boot)/sqrt(length(boot))
+theory <- mean(boot) + c(-1, 1) * qnorm(0.975) * se
+order_boot <- boot[order(unlist(boot))]
+quantile <- c(order_boot[0.025 * n_boot], order_boot[0.975 * n_boot])
+cat("beta1 = ", beta1, "\n")
+cat("bootstrapped beta1 = ", mean(boot), "\n")
+cat("quantile-based 95% CI = ", quantile, "\n")
+cat("theory-based 95% CI = ", theory, "\n")
+```
+
+These CIs do not suggest the slope coefficient is different from zero, since the beta1 is within the bounds of these confidence intervals.
